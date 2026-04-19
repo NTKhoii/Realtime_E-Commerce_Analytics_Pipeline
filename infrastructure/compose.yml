@@ -1,0 +1,171 @@
+services:
+  # ==========================================
+  # CỤM HADOOP & YARN (Tự Build bằng Dockerfile)
+  # ==========================================
+  namenode:
+    build: . 
+    image: my-hadoop-cluster:3.3.6 
+    networks:
+      - streaming-network
+    hostname: namenode
+    container_name: namenode
+    command: /usr/local/bin/start-namenode.sh
+    ports:
+      - '9870:9870' 
+    volumes:
+      - namenode_data:/data
+      - ./conf/capacity-scheduler.xml:/usr/local/hadoop/etc/hadoop/capacity-scheduler.xml
+      - ./conf/core-site.xml:/usr/local/hadoop/etc/hadoop/core-site.xml
+      - ./conf/hdfs-site.xml:/usr/local/hadoop/etc/hadoop/hdfs-site.xml
+      - ./conf/mapred-site.xml:/usr/local/hadoop/etc/hadoop/mapred-site.xml
+      - ./conf/yarn-site.xml:/usr/local/hadoop/etc/hadoop/yarn-site.xml
+    deploy:
+      resources:
+        limits:
+          memory: 512M # Ép RAM
+
+  datanode1:
+    image: my-hadoop-cluster:3.3.6
+    networks:
+      - streaming-network
+    hostname: datanode1
+    container_name: datanode1
+    command: [ "hdfs", "datanode" ]
+    ports:
+      - '19864:9864'
+    volumes:
+      - datanode1_data:/data
+      - ./conf/core-site.xml:/usr/local/hadoop/etc/hadoop/core-site.xml
+      - ./conf/hdfs-site.xml:/usr/local/hadoop/etc/hadoop/hdfs-site.xml
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  resourcemanager:
+    image: my-hadoop-cluster:3.3.6
+    networks:
+      - streaming-network
+    hostname: resourcemanager
+    container_name: resourcemanager
+    command: [ "yarn", "resourcemanager" ]
+    ports:
+      - '8088:8088' 
+    volumes:
+      - resourcemanager_data:/data
+      - ./conf/capacity-scheduler.xml:/usr/local/hadoop/etc/hadoop/capacity-scheduler.xml
+      - ./conf/core-site.xml:/usr/local/hadoop/etc/hadoop/core-site.xml
+      - ./conf/yarn-site.xml:/usr/local/hadoop/etc/hadoop/yarn-site.xml
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  nodemanager1:
+    image: my-hadoop-cluster:3.3.6
+    networks:
+      - streaming-network
+    hostname: nodemanager1
+    container_name: nodemanager1
+    command: [ "yarn", "nodemanager" ]
+    ports:
+      - '18042:8042'
+    volumes:
+      - nodemanager1_data:/data
+      - ./conf/core-site.xml:/usr/local/hadoop/etc/hadoop/core-site.xml
+      - ./conf/yarn-site.xml:/usr/local/hadoop/etc/hadoop/yarn-site.xml
+      - ./conf/mapred-site.xml:/usr/local/hadoop/etc/hadoop/mapred-site.xml
+    deploy:
+      resources:
+        limits:
+          memory: 1G # NodeManager cần 1GB để có sức gánh Spark Executor
+
+  # ==========================================
+  # CỤM DATA MART & BÁO CÁO 
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: stream_postgres
+    hostname: postgres
+    networks:
+      - streaming-network
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: glamira_db
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M 
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: stream_metabase
+    networks:
+      - streaming-network
+    ports:
+      - "3000:3000" 
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: glamira_db
+      MB_DB_PORT: 5432
+      MB_DB_USER: admin
+      MB_DB_PASS: password123
+      MB_DB_HOST: postgres
+      JAVA_TOOL_OPTIONS: "-Xmx512m" 
+    depends_on:
+      - postgres
+    volumes:
+      - ../metabase_data:/metabase-data # Thư mục này nằm ở root project
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+# ... (Các service postgres, metabase ở trên giữ nguyên) ...
+
+  # ==========================================
+  # CỤM SPARK CLIENT (Nơi em gõ code và nộp việc)
+  # ==========================================
+  spark-client:
+    build: 
+      context: ./spark-client
+      dockerfile: Dockerfile
+    container_name: spark-client
+    hostname: spark-client
+    networks:
+      - streaming-network
+    # Giữ container sống để có thể chui vào gõ code
+    command: tail -f /dev/null
+    environment:
+      - HADOOP_CONF_DIR=/opt/spark/hadoop-conf
+      - SPARK_HOME=/opt/spark
+    ports:
+      - "4040:4040" # Spark UI 1
+      - "4041:4041" # Spark UI 2
+    volumes:
+      - ../:/workspace  # Mount toàn bộ dự án vào container
+      - ./conf:/opt/spark/hadoop-conf # Đọc cấu hình từ thư mục conf của em
+      - ivy2-cache:/home/spark/.ivy2
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+networks:
+  streaming-network:
+    name: streaming-network 
+    driver: bridge
+
+volumes:
+  namenode_data:
+  datanode1_data:
+  resourcemanager_data:
+  nodemanager1_data:
+  pg_data:
+  ivy2-cache: 
+
