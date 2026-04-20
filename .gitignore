@@ -10,3 +10,13 @@ wheels/
 .venv
 # bỏ qua thư mục data
 data/
+
+# Dữ liệu Docker sinh ra (Cực kỳ nặng)
+infrastructure/metabase_data/
+
+# Dữ liệu (Tùy chọn: Nếu file BIN quá nặng > 100MB thì bỏ comment dòng dưới)
+# data/reference/*.BIN
+.env
+# File IDE
+.vscode/
+.idea/
