@@ -91,9 +91,9 @@ def setup_database():
         print("Khởi tạo Database thành công! Các bảng đã sẵn sàng đón dữ liệu.")
         
     except OperationalError as e:
-        print(f"❌ Lỗi kết nối Database: {e}")
+        print(f"Lỗi kết nối Database: {e}")
     except Exception as e:
-        print(f"❌ Lỗi thực thi SQL: {e}")
+        print(f"Lỗi thực thi SQL: {e}")
     finally:
         if conn:
             cursor.close()
