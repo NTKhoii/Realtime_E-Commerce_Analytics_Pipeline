@@ -22,7 +22,7 @@ def start_streaming():
         .appName(config['SPARK']['app_name']) \
         .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.6.0") \
         .getOrCreate()
-    spark.sparkContext.setLogLevel("WARN")
+    spark.sparkContext.setLogLevel("ERROR")
     # Gửi file nhị phân IP (.BIN) lên bộ nhớ RAM của tất cả các Node kĩ thuật này gọi là broadcast 
     bin_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data/reference/IP-COUNTRY-REGION-CITY.BIN'))
     spark.sparkContext.addFile(bin_path)
