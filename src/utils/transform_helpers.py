@@ -48,46 +48,22 @@ traffic_schema = StructType([
 ])
 
 parse_traffic_udf = udf(get_traffic_source, traffic_schema)
-
-
-# =====================================================================
-# 3. HÀM NATIVE: XỬ LÝ THỜI GIAN (Xây dựng Dim Date & Dim Time)
-# =====================================================================
 def enrich_time_dimensions(df):
-    """Biến đổi cột local_time (String) thành các cột thời gian chuẩn"""
-    # Ép kiểu chuỗi thành định dạng Timestamp của Spark
     df = df.withColumn("timestamp_obj", to_timestamp(col("local_time"), "yyyy-MM-dd HH:mm:ss"))    
-    # Bóc tách Dim Date
     df = df.withColumn("sk_date", date_format(col("timestamp_obj"), "yyyyMMdd").cast("int")) \
            .withColumn("full_date", col("timestamp_obj").cast("date")) \
            .withColumn("day", dayofmonth(col("timestamp_obj"))) \
            .withColumn("month", month(col("timestamp_obj"))) \
            .withColumn("year", year(col("timestamp_obj")))
-    # Bóc tách Dim Time
     df = df.withColumn("sk_time", date_format(col("timestamp_obj"), "HHmm").cast("int")) \
            .withColumn("hour", hour(col("timestamp_obj"))) \
            .withColumn("minute", minute(col("timestamp_obj")))
     return df
-
-
-# =====================================================================
-# 4. HÀM NATIVE: BĂM DỮ LIỆU TẠO KHÓA THAY THẾ (Surrogate Keys)
-# Dùng thuật toán MD5 để tạo các mã ID kết nối bảng Fact và Dim
-# =====================================================================
 def generate_surrogate_keys(df):
     """Tạo các mã sk_ dựa trên việc băm (hash) các cột nội dung"""
-    # sk_product: Sinh ra từ mã sản phẩm
     df = df.withColumn("sk_product", md5(col("product_id")))
-    
-    # sk_store: Sinh ra từ sự kết hợp của store_id và domain
     df = df.withColumn("sk_store", md5(concat_ws("_", col("store_id"), col("domain"))))
-    
-    # sk_device: Sinh ra từ sự kết hợp của OS, Browser và Độ phân giải
     df = df.withColumn("sk_device", md5(concat_ws("_", col("os"), col("browser"), col("resolution"))))
-    
-    # sk_location: Sinh ra từ Tên thành phố và Mã quốc gia
     df = df.withColumn("sk_location", md5(concat_ws("_", col("city_name"), col("region_name"), col("country_code"))))
-    
-    # sk_traffic: Sinh ra từ Nguồn đến và Loại Traffic
     df = df.withColumn("sk_traffic", md5(concat_ws("_", col("referrer_domain"), col("traffic_type"))))
     return df
