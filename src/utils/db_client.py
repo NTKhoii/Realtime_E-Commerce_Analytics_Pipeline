@@ -28,11 +28,6 @@ def upsert_data(cursor, table_name, columns, data, conflict_col):
     execute_values(cursor, query, data)
 
 def process_partition(partition_iterator):
-    """
-    Hàm này sẽ được gửi xuống và chạy ĐỘC LẬP trên từng máy Worker (Executor).
-    Nó chỉ xử lý 1 phần nhỏ của Micro-batch.
-    """
-    # Bước 1: Khởi tạo các Set/List rỗng trên RAM của máy Worker
     dim_product_set = set()
     dim_store_set = set()
     dim_location_set = set()
@@ -40,10 +35,7 @@ def process_partition(partition_iterator):
     dim_traffic_set = set()
     dim_date_set = set()
     dim_time_set = set()
-    fact_data_list = []
-
-    # Bước 2: Duyệt qua từng dòng trong Partition để gom nhóm và gỡ trùng (Deduplicate)
-    # Lượng data ở đây rất nhỏ, hoàn toàn an toàn cho RAM của Worker
+    fact_data_list = [] 
     has_data = False
     for row in partition_iterator:
         has_data = True
