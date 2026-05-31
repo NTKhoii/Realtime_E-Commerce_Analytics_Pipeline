@@ -14,6 +14,9 @@ data/
 # Dữ liệu Docker sinh ra (Cực kỳ nặng)
 infrastructure/metabase_data/
 
+# Runtime logs
+logs/
+
 # Dữ liệu (Tùy chọn: Nếu file BIN quá nặng > 100MB thì bỏ comment dòng dưới)
 # data/reference/*.BIN
 .env

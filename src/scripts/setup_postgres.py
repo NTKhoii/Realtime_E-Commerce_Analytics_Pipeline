@@ -1,7 +1,6 @@
 import psycopg2
 from psycopg2 import OperationalError
 
-# Thông số kết nối (Lưu ý: host là 'postgres' vì script chạy trong Docker)
 DB_CONFIG = {
     "host": "postgres",
     "port": "5432",
@@ -62,7 +61,7 @@ CREATE TABLE IF NOT EXISTS dim_traffic_source (
 );
 
 -- ==========================================
--- 2. TẠO BẢNG FACT (BẢNG SỰ KIỆN)
+-- 2. TẠO BẢNG FACT
 -- ==========================================
 
 CREATE TABLE IF NOT EXISTS fact_product_views (
@@ -73,19 +72,54 @@ CREATE TABLE IF NOT EXISTS fact_product_views (
     sk_store VARCHAR(255) REFERENCES dim_store(sk_store),
     sk_location VARCHAR(255) REFERENCES dim_location(sk_location),
     sk_device VARCHAR(255) REFERENCES dim_device(sk_device),
-    sk_traffic VARCHAR(255) REFERENCES dim_traffic_source(sk_traffic)
+    sk_traffic VARCHAR(255) REFERENCES dim_traffic_source(sk_traffic),
+    inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Backfill cho database đã tồn tại trước khi có cột inserted_at
+ALTER TABLE fact_product_views
+    ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_fact_views_inserted_at ON fact_product_views(inserted_at);
+
+-- ==========================================
+-- 3. AGGREGATE TABLES (Built by Airflow daily job)
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS agg_daily_views_by_country (
+    sk_date INT NOT NULL,
+    country_code VARCHAR(10) NOT NULL,
+    country_name VARCHAR(255),
+    view_count BIGINT NOT NULL,
+    unique_products BIGINT NOT NULL,
+    PRIMARY KEY (sk_date, country_code)
+);
+
+CREATE TABLE IF NOT EXISTS agg_daily_top_products (
+    sk_date INT NOT NULL,
+    product_id VARCHAR(255) NOT NULL,
+    view_count BIGINT NOT NULL,
+    rank INT NOT NULL,
+    PRIMARY KEY (sk_date, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS agg_daily_traffic_breakdown (
+    sk_date INT NOT NULL,
+    traffic_type VARCHAR(100) NOT NULL,
+    view_count BIGINT NOT NULL,
+    PRIMARY KEY (sk_date, traffic_type)
 );
 """
 
 def setup_database():
-    print("Đang kết nối tới PostgreSQL...")
+    print("Đang kết nối tới PostgreSQL")
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         conn.autocommit = True
         cursor = conn.cursor()
         
-        print("Đang khởi tạo Star Schema (Dim & Fact tables)...")
+        print("Đang khởi tạo Star Schema (Dim & Fact tables)")
         cursor.execute(DDL_QUERIES)
         
         print("Khởi tạo Database thành công! Các bảng đã sẵn sàng đón dữ liệu.")

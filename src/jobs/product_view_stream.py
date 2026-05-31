@@ -47,6 +47,7 @@ def start_streaming():
         .option("kafka.security.protocol", config['KAFKA']['security_protocol']) \
         .option("kafka.sasl.mechanism", config['KAFKA']['sasl_mechanism']) \
         .option("kafka.sasl.jaas.config", config['KAFKA']['sasl_jaas_config']) \
+        .option("failOnDataLoss", "false") \
         .load()
 
     df_parsed = df_raw.selectExpr("CAST(value AS STRING) as json_payload") \

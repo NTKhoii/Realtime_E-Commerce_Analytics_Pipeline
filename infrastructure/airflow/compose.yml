@@ -1,0 +1,114 @@
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.10.4
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Asia/Ho_Chi_Minh'
+    _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-docker==3.14.1 psycopg2-binary==2.9.9 requests==2.32.3"
+    GLAMIRA_DB_HOST: postgres
+    GLAMIRA_DB_PORT: '5432'
+    GLAMIRA_DB_NAME: glamira_db
+    GLAMIRA_DB_USER: admin
+    GLAMIRA_DB_PASSWORD: password123
+    STREAMING_FRESHNESS_THRESHOLD_MINUTES: '10'
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-../../}/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-../../}/logs/airflow_logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-../../}/plugins:/opt/airflow/plugins
+    - /var/run/docker.sock:/var/run/docker.sock
+  networks:
+    - streaming-network
+  user: "${AIRFLOW_UID:-50000}:0" # Đảm bảo quyền truy cập cho Airflow
+  depends_on:
+    &airflow-common-depends-on
+    airflow-postgres:
+      condition: service_healthy
+
+services:
+  # DB dành riêng cho Airflow
+  airflow-postgres:
+    image: postgres:15-alpine
+    container_name: airflow-postgres
+    networks:
+      - streaming-network
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Web UI (Giao diện)
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on 
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Khởi tạo dữ liệu và phân quyền (Giữ nguyên Script xịn của file gốc)
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /sources/logs/airflow_logs /sources/dags /sources/plugins
+        chown -R "${AIRFLOW_UID}:0" /sources/logs/airflow_logs /sources/dags /sources/plugins
+        exec /entrypoint airflow version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+      _PIP_ADDITIONAL_REQUIREMENTS: ''
+    user: "0:0"
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-../../}:/sources
+
+volumes:
+  airflow-db-data:
+
+networks:
+  streaming-network:
+    external: true
