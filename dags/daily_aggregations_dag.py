@@ -1,13 +1,13 @@
-"""Daily aggregations: roll fact_product_views into report tables for Metabase."""
 import os
+import sys
 from datetime import datetime, timedelta
-
 import psycopg2
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+# Fix lỗi không tìm thấy module telegram_alert
+sys.path.append('/opt/airflow/plugins')
 from telegram_alert import send_telegram_alert
-
 
 DB_CONFIG = {
     "host": os.environ.get("GLAMIRA_DB_HOST", "postgres"),
@@ -18,77 +18,25 @@ DB_CONFIG = {
 }
 
 TOP_N_PRODUCTS = 50
-
-UPSERT_VIEWS_BY_COUNTRY = """
-INSERT INTO agg_daily_views_by_country (sk_date, country_code, country_name, view_count, unique_products)
-SELECT
-    f.sk_date,
-    COALESCE(l.country_code, 'UNKNOWN') AS country_code,
-    COALESCE(l.country_name, 'UNKNOWN') AS country_name,
-    COUNT(*) AS view_count,
-    COUNT(DISTINCT f.sk_product) AS unique_products
-FROM fact_product_views f
-LEFT JOIN dim_location l ON l.sk_location = f.sk_location
-WHERE f.sk_date = %(sk_date)s
-GROUP BY f.sk_date, l.country_code, l.country_name
-ON CONFLICT (sk_date, country_code) DO UPDATE SET
-    country_name = EXCLUDED.country_name,
-    view_count = EXCLUDED.view_count,
-    unique_products = EXCLUDED.unique_products;
-"""
-
-UPSERT_TOP_PRODUCTS = """
-INSERT INTO agg_daily_top_products (sk_date, product_id, view_count, rank)
-SELECT sk_date, product_id, view_count, rank FROM (
-    SELECT
-        f.sk_date,
-        p.product_id,
-        COUNT(*) AS view_count,
-        ROW_NUMBER() OVER (PARTITION BY f.sk_date ORDER BY COUNT(*) DESC) AS rank
-    FROM fact_product_views f
-    JOIN dim_product p ON p.sk_product = f.sk_product
-    WHERE f.sk_date = %(sk_date)s
-    GROUP BY f.sk_date, p.product_id
-) ranked
-WHERE rank <= %(top_n)s
-ON CONFLICT (sk_date, product_id) DO UPDATE SET
-    view_count = EXCLUDED.view_count,
-    rank = EXCLUDED.rank;
-"""
-
-UPSERT_TRAFFIC_BREAKDOWN = """
-INSERT INTO agg_daily_traffic_breakdown (sk_date, traffic_type, view_count)
-SELECT
-    f.sk_date,
-    COALESCE(t.traffic_type, 'UNKNOWN') AS traffic_type,
-    COUNT(*) AS view_count
-FROM fact_product_views f
-LEFT JOIN dim_traffic_source t ON t.sk_traffic = f.sk_traffic
-WHERE f.sk_date = %(sk_date)s
-GROUP BY f.sk_date, t.traffic_type
-ON CONFLICT (sk_date, traffic_type) DO UPDATE SET
-    view_count = EXCLUDED.view_count;
-"""
-
+SQL_DIR = "/opt/airflow/dags/sql"
 
 def _sk_date_for(ds: str) -> int:
     return int(datetime.strptime(ds, "%Y-%m-%d").strftime("%Y%m%d"))
 
-
-def build_aggregations(ds: str, **_):
+def execute_sql_file(file_name: str, ds: str, **kwargs):
+    """Đọc file SQL và thực thi"""
     sk_date = _sk_date_for(ds)
     params = {"sk_date": sk_date, "top_n": TOP_N_PRODUCTS}
-    print(f"Đang xây dựng aggregations cho sk_date={sk_date} ({ds})...")
-    with psycopg2.connect(**DB_CONFIG) as conn, conn.cursor() as cur:
-        cur.execute(UPSERT_VIEWS_BY_COUNTRY, params)
-        print(f"  agg_daily_views_by_country: {cur.rowcount} rows")
-        cur.execute(UPSERT_TOP_PRODUCTS, params)
-        print(f"  agg_daily_top_products: {cur.rowcount} rows")
-        cur.execute(UPSERT_TRAFFIC_BREAKDOWN, params)
-        print(f"  agg_daily_traffic_breakdown: {cur.rowcount} rows")
-        conn.commit()
-    print(f"Xong aggregations cho ngày {ds}.")
+    
+    file_path = os.path.join(SQL_DIR, file_name)
+    with open(file_path, "r", encoding="utf-8") as f:
+        sql_query = f.read()
 
+    print(f"Đang chạy {file_name} cho sk_date={sk_date} ({ds})...")
+    with psycopg2.connect(**DB_CONFIG) as conn, conn.cursor() as cur:
+        cur.execute(sql_query, params)
+        print(f"Hoàn thành {file_name}: {cur.rowcount} dòng được UPSERT.")
+        conn.commit()
 
 default_args = {
     "owner": "data-platform",
@@ -107,7 +55,27 @@ with DAG(
     max_active_runs=1,
     tags=["batch", "analytics"],
 ) as dag:
-    PythonOperator(
-        task_id="build_daily_aggregations",
-        python_callable=build_aggregations,
+
+    # Task 1: Gom Quốc Gia
+    task_country = PythonOperator(
+        task_id="agg_views_by_country",
+        python_callable=execute_sql_file,
+        op_kwargs={"file_name": "views_by_country.sql"}
     )
+
+    # Task 2: Gom Sản Phẩm HOT
+    task_products = PythonOperator(
+        task_id="agg_top_products",
+        python_callable=execute_sql_file,
+        op_kwargs={"file_name": "top_products.sql"}
+    )
+
+    # Task 3: Gom Traffic Nguồn
+    task_traffic = PythonOperator(
+        task_id="agg_traffic_breakdown",
+        python_callable=execute_sql_file,
+        op_kwargs={"file_name": "traffic_breakdown.sql"}
+    )
+
+    # Dòng định tuyến: Khai báo 3 Task này nằm trong ngoặc vuông để chạy SONG SONG cùng 1 lúc!
+    [task_country, task_products, task_traffic]
